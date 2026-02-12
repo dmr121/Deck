@@ -75,35 +75,29 @@ public final class DeckViewModel<Item: Identifiable & Equatable & Sendable> wher
     /// 1. The current top card.
     /// 2. The next few cards (up to `DeckConfiguration.visibleCount`).
     /// 3. Any cards currently animating off the screen.
-    public var renderableCards: [Item] {
+    public var renderableCards: [(item: Item, index: Int)] {
         guard currentIndex < cards.count else { return [] }
-        
+
+        // 1. Exiting Cards
+        // Optimization: Only scan the cards BEFORE the current index (O(N) but on a smaller subset).
+        // These are cards that have been swiped but are still animating away.
+        let exitingItems: [(Item, Int)] = cards.prefix(currentIndex)
+            .enumerated()
+            .filter { exitingCardIds.contains($0.element.id) }
+            .map { ($0.element, $0.offset) }
+
+        // 2. Visible Window
+        // Optimization: Use direct slice access (O(1)) instead of searching.
+        // We use .indices on the slice to get the absolute index in the main array.
         let endIndex = min(currentIndex + DeckConfiguration.visibleCount, cards.count)
-        let visibleWindow = cards[currentIndex..<endIndex]
-        
-        let exitingCards = cards.filter { exitingCardIds.contains($0.id) }
-        
-        var seenIDs = Set<Item.ID>()
-        var combined: [Item] = []
-        for item in visibleWindow {
-            if !seenIDs.contains(item.id) {
-                combined.append(item)
-                seenIDs.insert(item.id)
-            }
-        }
-        for item in exitingCards {
-            if !seenIDs.contains(item.id) {
-                combined.append(item)
-                seenIDs.insert(item.id)
-            }
-        }
-        
-        // Return sorted by original index to ensure correct Z-Stacking order
-        return combined.sorted { item1, item2 in
-            guard let i1 = cards.firstIndex(of: item1),
-                  let i2 = cards.firstIndex(of: item2) else { return false }
-            return i1 < i2
-        }
+        let visibleItems: [(Item, Int)] = cards[currentIndex..<endIndex]
+            .indices
+            .map { (cards[$0], $0) }
+
+        // 3. Combine
+        // Exiting cards (lower indices) + Visible cards (higher indices)
+        // This preserves Z-order without needing a .sorted() call.
+        return exitingItems + visibleItems
     }
     
     /// Returns the item currently at the top of the stack, or `nil` if the stack is exhausted.
@@ -143,7 +137,11 @@ public final class DeckViewModel<Item: Identifiable & Equatable & Sendable> wher
     @MainActor
     public func undo() {
         guard canPerformAction(), let lastAction = swipeHistory.popLast() else { return }
-        currentIndex = lastAction.index
+        
+        withAnimation {
+            currentIndex = lastAction.index
+        }
+        
         let item = cards[currentIndex]
         undoItem = (item, lastAction.lastOffset)
     }
@@ -159,7 +157,9 @@ public final class DeckViewModel<Item: Identifiable & Equatable & Sendable> wher
         swipeHistory.append((index: currentIndex, direction: direction, lastOffset: finalOffset))
         pendingSwipe.removeValue(forKey: item.id)
         
-        currentIndex += 1
+        withAnimation {
+            currentIndex += 1
+        }
         
         // Briefly lock interaction to prevent accidental double-swipes
         Task {

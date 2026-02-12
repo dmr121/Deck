@@ -4,6 +4,12 @@
 //
 //  Created by David Rozmajzl on 2/3/26.
 //
+//
+//  Deck.swift
+//  tinder test
+//
+//  Created by David Rozmajzl on 2/3/26.
+//
 
 import SwiftUI
 
@@ -35,8 +41,8 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     private let items: [Item]
     private var manager: DeckViewModel<Item>
     
-    /// The closure to render the card content. Accepts the item and the system overlay view (AnyView).
-    private let content: (Item, AnyView) -> Content
+    /// The closure to render the card content. Accepts the item and the system overlay view
+    private let content: (Item, DeckSystemOverlay<Overlay, Detail>) -> Content
     
     private let overlay: (SwipeDirection) -> Overlay
     private let detail: (Item) -> Detail
@@ -47,7 +53,8 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     
     // Action callbacks
     private var onSwipeAction: ((Item, SwipeDirection) -> Void)?
-    private var onUndoAction: (() -> Void)?
+    private var onUndoAction: ((Item) -> Void)?
+    private var onDoneAction: (() -> Void)?
     
     // MARK: - Initializers
     
@@ -55,13 +62,14 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     internal init(
         items: [Item],
         manager: DeckViewModel<Item>,
-        content: @escaping (Item, AnyView) -> Content,
+        content: @escaping (Item, DeckSystemOverlay<Overlay, Detail>) -> Content,
         overlay: @escaping (SwipeDirection) -> Overlay,
         detail: @escaping (Item) -> Detail,
         allowedDirections: Set<SwipeDirection> = DeckConfiguration.allowedDirections,
         hasDetailView: Bool = false,
         onSwipeAction: ((Item, SwipeDirection) -> Void)? = nil,
-        onUndoAction: (() -> Void)? = nil
+        onUndoAction: ((Item) -> Void)? = nil,
+        onDoneAction: (() -> Void)? = nil
     ) {
         self.items = items
         self.manager = manager
@@ -72,6 +80,7 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
         self.hasDetailView = hasDetailView
         self.onSwipeAction = onSwipeAction
         self.onUndoAction = onUndoAction
+        self.onDoneAction = onDoneAction
         
         // Sync items if necessary
         if manager.cards != items {
@@ -90,7 +99,7 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     /// **Important:** You MUST add `overlays` to your ZStack, otherwise swipe indicators will not appear.
     /// - Parameter content: A closure returning the card view.
     public func content<NewContent: View>(
-        @ViewBuilder _ content: @escaping (Item, AnyView) -> NewContent
+        @ViewBuilder _ content: @escaping (Item, DeckSystemOverlay<Overlay, Detail>) -> NewContent
     ) -> Deck<Item, NewContent, Overlay, Detail> {
         Deck<Item, NewContent, Overlay, Detail>(
             items: items,
@@ -101,7 +110,8 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
             allowedDirections: allowedDirections,
             hasDetailView: hasDetailView,
             onSwipeAction: onSwipeAction,
-            onUndoAction: onUndoAction
+            onUndoAction: onUndoAction,
+            onDoneAction: onDoneAction
         )
     }
     
@@ -110,17 +120,18 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     /// - Parameter overlay: A closure that takes a `SwipeDirection` and returns a View.
     public func overlay<NewOverlay: View>(
         @ViewBuilder _ overlay: @escaping (SwipeDirection) -> NewOverlay
-    ) -> Deck<Item, Content, NewOverlay, Detail> {
-        Deck<Item, Content, NewOverlay, Detail>(
+    ) -> Deck<Item, EmptyView, NewOverlay, Detail> {
+        Deck<Item, EmptyView, NewOverlay, Detail>(
             items: items,
             manager: manager,
-            content: content,
+            content: { _, _ in EmptyView() },
             overlay: overlay,
             detail: detail,
             allowedDirections: allowedDirections,
             hasDetailView: hasDetailView,
             onSwipeAction: onSwipeAction,
-            onUndoAction: onUndoAction
+            onUndoAction: onUndoAction,
+            onDoneAction: onDoneAction
         )
     }
     
@@ -130,17 +141,18 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     /// - Parameter detail: A closure that takes an `Item` and returns a View.
     public func detail<NewDetail: View>(
         @ViewBuilder _ detail: @escaping (Item) -> NewDetail
-    ) -> Deck<Item, Content, Overlay, NewDetail> {
-        Deck<Item, Content, Overlay, NewDetail>(
+    ) -> Deck<Item, EmptyView, Overlay, NewDetail> {
+        Deck<Item, EmptyView, Overlay, NewDetail>(
             items: items,
             manager: manager,
-            content: content,
+            content: { _, _ in EmptyView() },
             overlay: overlay,
             detail: detail,
             allowedDirections: allowedDirections,
             hasDetailView: true, // Mark detail as present
             onSwipeAction: onSwipeAction,
-            onUndoAction: onUndoAction
+            onUndoAction: onUndoAction,
+            onDoneAction: onDoneAction
         )
     }
     
@@ -167,21 +179,27 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     ///
     /// This callback is triggered for both tap-to-undo and programmatic undo.
     /// - Parameter action: A closure to execute on undo.
-    public func onUndo(_ action: @escaping () -> Void) -> Self {
+    public func onUndo(_ action: @escaping (Item) -> Void) -> Self {
         var copy = self
         copy.onUndoAction = action
+        return copy
+    }
+    
+    /// Registers a callback to be executed when the last card in the deck is swiped.
+    public func onDone(_ action: @escaping () -> Void) -> Self {
+        var copy = self
+        copy.onDoneAction = action
         return copy
     }
     
     // MARK: - Body
     
     // Helper to calculate scale based on drag distance
-    private func getScale(for item: Item) -> CGFloat {
+    private func getScale(for item: Item, at index: Int) -> CGFloat {
         if item.id == manager.topCard?.id || manager.exitingCardIds.contains(item.id) {
             return 1.0
         }
         
-        guard let index = manager.cards.firstIndex(of: item) else { return 0.95 }
         let distance = index - manager.currentIndex
         
         // Scale only the card immediately behind the top card
@@ -197,7 +215,7 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
     public var body: some View {
         GeometryReader { geo in
             ZStack {
-                ForEach(manager.renderableCards.reversed()) { item in
+                ForEach(manager.renderableCards.reversed(), id: \.item.id) { (item, index) in
                     InternalCardContainer(
                         item: item,
                         manager: manager,
@@ -207,22 +225,24 @@ where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay:
                         detail: detail,
                         allowedDirections: allowedDirections,
                         hasDetailView: hasDetailView,
-                        onSwipe: onSwipeAction // Pass callback down
+                        onSwipe: onSwipeAction, // Pass callback down
+                        onDone: onDoneAction,
+                        index: index,
+                        totalCount: manager.cards.count
                     )
-                    .zIndex(Double(manager.cards.count - (manager.cards.firstIndex(of: item) ?? 0)))
+                    .zIndex(Double(manager.cards.count - index))
                     .transition(.identity)
-                    .scaleEffect(getScale(for: item))
+                    .scaleEffect(getScale(for: item, at: index))
                     // Ensures smooth interpolation of scale when drag is released
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: getScale(for: item))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: getScale(for: item, at: index))
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .animation(.default, value: manager.currentIndex)
             // Monitor Undo state changes here to trigger the callback
             .onChange(of: manager.undoItem?.item.id) { _, newValue in
                 // If undoItem is set, an undo action just started
-                if newValue != nil {
-                    onUndoAction?()
+                if newValue != nil, let item = manager.undoItem?.item {
+                    onUndoAction?(item)
                 }
             }
         }
@@ -248,4 +268,3 @@ public extension Deck where Content == EmptyView, Overlay == EmptyView, Detail =
         )
     }
 }
-

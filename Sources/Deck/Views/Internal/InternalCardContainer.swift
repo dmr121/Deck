@@ -21,8 +21,8 @@ where Item: Sendable & Identifiable & Equatable, Item.ID: Sendable, Content: Vie
     var manager: DeckViewModel<Item>
     let viewSize: CGSize
     
-    // UPDATED: Content closure now accepts the system overlays (as AnyView to avoid type recursion)
-    let content: (Item, AnyView) -> Content
+    // UPDATED: Content closure now accepts the system overlays
+    let content: (Item, DeckSystemOverlay<Overlay, Detail>) -> Content
     
     let overlay: (SwipeDirection) -> Overlay
     let detail: (Item) -> Detail
@@ -33,6 +33,11 @@ where Item: Sendable & Identifiable & Equatable, Item.ID: Sendable, Content: Vie
     
     /// Closure triggered when the card is successfully swiped.
     let onSwipe: ((Item, SwipeDirection) -> Void)?
+    let onDone: (() -> Void)?
+    
+    // In InternalCardContainer.swift properties
+    let index: Int
+    let totalCount: Int
     
     @State private var offset: CGSize = .zero
     @State private var showDetail: Bool = false
@@ -55,8 +60,7 @@ where Item: Sendable & Identifiable & Equatable, Item.ID: Sendable, Content: Vie
                     detailBuilder: { detail(item) }
                 )
                 
-                // 2. Wrap it in AnyView (Type Erasure) and pass to user content
-                return content(item, AnyView(systemOverlay))
+                return content(item, systemOverlay)
             },
             onDragChanged: { change in
                 offset = change
@@ -94,6 +98,10 @@ where Item: Sendable & Identifiable & Equatable, Item.ID: Sendable, Content: Vie
                     // Trigger the swipe callback
                     onSwipe?(item, direction)
                     
+                    if index == totalCount - 1 {
+                        onDone?()
+                    }
+                    
                     let escape = physics.projectEscapeVector(from: finalOffset)
                     withAnimation(DeckConfiguration.flightAnimation) { self.offset = escape }
                     manager.startExiting(item, direction: direction, finalOffset: escape)
@@ -116,6 +124,10 @@ where Item: Sendable & Identifiable & Equatable, Item.ID: Sendable, Content: Vie
             if let direction = direction {
                 // Trigger the swipe callback
                 onSwipe?(item, direction)
+                
+                if index == manager.cards.count - 1 {
+                    onDone?()
+                }
                 
                 let physics = SwipePhysics(viewSize: viewSize)
                 let target = physics.targetPoint(for: direction)
@@ -143,4 +155,3 @@ where Item: Sendable & Identifiable & Equatable, Item.ID: Sendable, Content: Vie
         }
     }
 }
-
