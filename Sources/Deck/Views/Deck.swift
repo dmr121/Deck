@@ -13,258 +13,257 @@
 
 import SwiftUI
 
-/// A Tinder-style swipeable card stack container.
+/// A view that displays a stack of cards which can be swiped in specified directions.
 ///
-/// `Deck` renders a stack of cards based on the provided items and handles the complex logic of
-/// swiping, undoing, scaling background cards, and managing memory/rendering performance.
+/// Use `Deck` to create a Tinder-like card swiping interface. You provide a `DeckViewModel`,
+/// the allowed swipe directions, and closures to define the appearance of the card, the detail overlay,
+/// and the swipe directional overlays.
 ///
-/// You configure the deck using a declarative modifier syntax:
+/// Example usage:
 /// ```swift
-/// Deck(items: profiles, manager: viewModel)
-///     .content { profile, overlays in
-///         // Place your card content and the overlays in a ZStack
-///         ZStack {
-///             ...
-///             overlays
-///         }
-///     }
-///     .swipeDirections([.left, .right])
-///     .onSwipe { item, direction in
-///         print("Swiped \(item) to \(direction)")
-///     }
+/// let viewModel = DeckViewModel(items: profiles)
+///
+/// Deck([.left, .right], viewModel: viewModel) { item, isOnTop in
+///     CardView(profile: item)
+/// } detailOverlay: { item in
+///     CardDetailView(profile: item)
+/// } swipeOverlay: { direction in
+///     Text(direction == .left ? "NOPE" : "LIKE")
+/// }
 /// ```
-public struct Deck<Item: Sendable, Content, Overlay, Detail>: View
-where Item: Identifiable & Equatable, Item.ID: Sendable, Content: View, Overlay: View, Detail: View {
+public struct Deck<Item, Content, DetailOverlay, SwipeOverlay>: View
+where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeOverlay: View {
+    private let allowedDirections: Set<SwipeDirection>
+    private let viewModel: DeckViewModel<Item>
+    private let onSwipe: ((Item, SwipeDirection) -> Void)?
+    private let onUndo: ((Item) -> Void)?
+    private let content: (Item, Bool) -> Content
+    private let detailOverlay: (Item) -> DetailOverlay
+    private let swipeOverlay: (SwipeDirection) -> SwipeOverlay
     
-    // MARK: - Properties
+    @State private var dragOffset: CGSize = .zero
+    @GestureState private var dragGestureActive = false
+    @State private var isDragging = false
+    @State private var canTap = true
+    @State private var dragTask: Task<Void, Never>?
+    @State private var showOverlay = false
+    @State private var lastSwipeDirection: SwipeDirection = .right
     
-    private let items: [Item]
-    private var manager: DeckViewModel<Item>
-    
-    /// The closure to render the card content. Accepts the item and the system overlay view
-    private let content: (Item, DeckSystemOverlay<Overlay, Detail>) -> Content
-    
-    private let overlay: (SwipeDirection) -> Overlay
-    private let detail: (Item) -> Detail
-    
-    // Configuration properties
-    private var allowedDirections: Set<SwipeDirection>
-    private var hasDetailView: Bool
-    
-    // Action callbacks
-    private var onSwipeAction: ((Item, SwipeDirection) -> Void)?
-    private var onUndoAction: ((Item) -> Void)?
-    private var onDoneAction: (() -> Void)?
-    
-    // MARK: - Initializers
-    
-    /// Internal initializer for reconstruction by modifiers.
-    internal init(
-        items: [Item],
-        manager: DeckViewModel<Item>,
-        content: @escaping (Item, DeckSystemOverlay<Overlay, Detail>) -> Content,
-        overlay: @escaping (SwipeDirection) -> Overlay,
-        detail: @escaping (Item) -> Detail,
-        allowedDirections: Set<SwipeDirection> = DeckConfiguration.allowedDirections,
-        hasDetailView: Bool = false,
-        onSwipeAction: ((Item, SwipeDirection) -> Void)? = nil,
-        onUndoAction: ((Item) -> Void)? = nil,
-        onDoneAction: (() -> Void)? = nil
+    /// Creates a new swipable deck view.
+    /// - Parameters:
+    ///   - directions: A set of `SwipeDirection` indicating which directions a user is allowed to swipe.
+    ///   - viewModel: The `DeckViewModel` that manages the data and state of the deck.
+    ///   - onSwipe: An optional closure executed when an item is successfully swiped.
+    ///   - onUndo: An optional closure executed when a swiped item is undone.
+    ///   - content: A closure that returns the view for an individual item. The boolean indicates if the item is currently on top.
+    ///   - detailOverlay: A closure that returns a view to overlay on the card when tapped or focused.
+    ///   - swipeOverlay: A closure that returns a view representing the action of the current swipe direction (e.g., a "LIKE" stamp).
+    public init(
+        _ directions: Set<SwipeDirection>,
+        viewModel: DeckViewModel<Item>,
+        onSwipe: ((Item, SwipeDirection) -> Void)? = nil,
+        onUndo: ((Item) -> Void)? = nil,
+        content: @escaping (Item, Bool) -> Content,
+        detailOverlay: @escaping (Item) -> DetailOverlay,
+        swipeOverlay: @escaping (SwipeDirection) -> SwipeOverlay
     ) {
-        self.items = items
-        self.manager = manager
+        self.allowedDirections = directions
+        self.viewModel = viewModel
+        self.viewModel.onSwipe = onSwipe
+        self.viewModel.onUndo = onUndo
+        self.onSwipe = onSwipe
+        self.onUndo = onUndo
         self.content = content
-        self.overlay = overlay
-        self.detail = detail
-        self.allowedDirections = allowedDirections
-        self.hasDetailView = hasDetailView
-        self.onSwipeAction = onSwipeAction
-        self.onUndoAction = onUndoAction
-        self.onDoneAction = onDoneAction
-        
-        // Sync items if necessary
-        if manager.cards != items {
-            manager.cards = items
-        }
-    }
-    
-    // MARK: - Modifiers
-    
-    /// Defines the content view for each card in the deck.
-    ///
-    /// The closure provides:
-    /// 1. `item`: The data model.
-    /// 2. `overlays`: A View containing the Swipe Overlays (Like/Nope) and Detail View.
-    ///
-    /// **Important:** You MUST add `overlays` to your ZStack, otherwise swipe indicators will not appear.
-    /// - Parameter content: A closure returning the card view.
-    public func content<NewContent: View>(
-        @ViewBuilder _ content: @escaping (Item, DeckSystemOverlay<Overlay, Detail>) -> NewContent
-    ) -> Deck<Item, NewContent, Overlay, Detail> {
-        Deck<Item, NewContent, Overlay, Detail>(
-            items: items,
-            manager: manager,
-            content: content,
-            overlay: overlay,
-            detail: detail,
-            allowedDirections: allowedDirections,
-            hasDetailView: hasDetailView,
-            onSwipeAction: onSwipeAction,
-            onUndoAction: onUndoAction,
-            onDoneAction: onDoneAction
-        )
-    }
-    
-    /// Defines the overlay view to display when a card is swiped.
-    ///
-    /// - Parameter overlay: A closure that takes a `SwipeDirection` and returns a View.
-    public func overlay<NewOverlay: View>(
-        @ViewBuilder _ overlay: @escaping (SwipeDirection) -> NewOverlay
-    ) -> Deck<Item, EmptyView, NewOverlay, Detail> {
-        Deck<Item, EmptyView, NewOverlay, Detail>(
-            items: items,
-            manager: manager,
-            content: { _, _ in EmptyView() },
-            overlay: overlay,
-            detail: detail,
-            allowedDirections: allowedDirections,
-            hasDetailView: hasDetailView,
-            onSwipeAction: onSwipeAction,
-            onUndoAction: onUndoAction,
-            onDoneAction: onDoneAction
-        )
-    }
-    
-    /// Defines the detail view to display when a card is held down (long pressed).
-    ///
-    /// If this modifier is excluded, the long-press gesture will be disabled.
-    /// - Parameter detail: A closure that takes an `Item` and returns a View.
-    public func detail<NewDetail: View>(
-        @ViewBuilder _ detail: @escaping (Item) -> NewDetail
-    ) -> Deck<Item, EmptyView, Overlay, NewDetail> {
-        Deck<Item, EmptyView, Overlay, NewDetail>(
-            items: items,
-            manager: manager,
-            content: { _, _ in EmptyView() },
-            overlay: overlay,
-            detail: detail,
-            allowedDirections: allowedDirections,
-            hasDetailView: true, // Mark detail as present
-            onSwipeAction: onSwipeAction,
-            onUndoAction: onUndoAction,
-            onDoneAction: onDoneAction
-        )
-    }
-    
-    /// Sets the allowed swipe directions for this specific Deck instance.
-    ///
-    /// - Parameter directions: The set of allowed directions.
-    public func swipeDirections(_ directions: Set<SwipeDirection>) -> Self {
-        var copy = self
-        copy.allowedDirections = directions
-        return copy
-    }
-    
-    /// Registers a callback to be executed when a card is fully swiped off-screen.
-    ///
-    /// This callback is triggered for both manual gestures and programmatic swipes.
-    /// - Parameter action: A closure receiving the swiped `Item` and the `SwipeDirection`.
-    public func onSwipe(_ action: @escaping (Item, SwipeDirection) -> Void) -> Self {
-        var copy = self
-        copy.onSwipeAction = action
-        return copy
-    }
-    
-    /// Registers a callback to be executed when an Undo operation occurs.
-    ///
-    /// This callback is triggered for both tap-to-undo and programmatic undo.
-    /// - Parameter action: A closure to execute on undo.
-    public func onUndo(_ action: @escaping (Item) -> Void) -> Self {
-        var copy = self
-        copy.onUndoAction = action
-        return copy
-    }
-    
-    /// Registers a callback to be executed when the last card in the deck is swiped.
-    public func onDone(_ action: @escaping () -> Void) -> Self {
-        var copy = self
-        copy.onDoneAction = action
-        return copy
-    }
-    
-    // MARK: - Body
-    
-    // Helper to calculate scale based on drag distance
-    private func getScale(for item: Item, at index: Int) -> CGFloat {
-        if item.id == manager.topCard?.id || manager.exitingCardIds.contains(item.id) {
-            return 1.0
-        }
-        
-        let distance = index - manager.currentIndex
-        
-        // Scale only the card immediately behind the top card
-        if distance == 1 {
-            let maxDist = max(abs(manager.currentDragOffset.width), abs(manager.currentDragOffset.height))
-            let progress = min(maxDist / DeckConfiguration.swipeThreshold, 1.0)
-            return 0.95 + (0.05 * progress)
-        }
-        
-        return 0.95
+        self.detailOverlay = detailOverlay
+        self.swipeOverlay = swipeOverlay
     }
     
     public var body: some View {
-        GeometryReader { geo in
+        GeometryReader { geometry in
             ZStack {
-                ForEach(manager.renderableCards.reversed(), id: \.item.id) { (item, index) in
-                    InternalCardContainer(
-                        item: item,
-                        manager: manager,
-                        viewSize: geo.size,
-                        content: content,
-                        overlay: overlay,
-                        detail: detail,
-                        allowedDirections: allowedDirections,
-                        hasDetailView: hasDetailView,
-                        onSwipe: onSwipeAction, // Pass callback down
-                        onDone: onDoneAction,
-                        index: index,
-                        totalCount: manager.cards.count
-                    )
-                    .zIndex(Double(manager.cards.count - index))
-                    .transition(.identity)
-                    .scaleEffect(getScale(for: item, at: index))
-                    // Ensures smooth interpolation of scale when drag is released
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: getScale(for: item, at: index))
+                ForEach(viewModel.shownItems, id: \.item.id) { (item, index) in
+                    let isOnTop = index == viewModel.internalIndex
+                    let currentlySwipingItem = viewModel.currentlySwipingItems.first(where: { $0.index == index })
+                    
+                    let offsetX: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.width : (isOnTop ? dragOffset.width : 0)
+                    let offsetY: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.height : (isOnTop ? dragOffset.height : 0)
+                    
+                    let horizontalDirection: SwipeDirection = offsetX > 0 ? .right : .left
+                    let verticalDirection: SwipeDirection = offsetY > 0 ? .down : .up
+                    
+                    let isXAxisDominant = abs(offsetX) > abs(offsetY)
+                    let primaryDirection = isXAxisDominant ? horizontalDirection : verticalDirection
+                    let secondaryDirection = isXAxisDominant ? verticalDirection : horizontalDirection
+                    
+                    let dynamicDirection: SwipeDirection = allowedDirections.contains(primaryDirection) ? primaryDirection : secondaryDirection
+                    let isActivelySwiping = isDragging || currentlySwipingItem != nil
+                    let currentSwipeDirection: SwipeDirection = isActivelySwiping ? dynamicDirection : lastSwipeDirection
+                    
+                    let activeDrag = (currentSwipeDirection == .left || currentSwipeDirection == .right) ? abs(offsetX) : abs(offsetY)
+                    let maxDragForOpacity = geometry.size.width * viewModel.config.dragThreshold
+                    let clampedOpacityDrag = min(activeDrag, maxDragForOpacity)
+                    let swipeOverlayOpacity: Double = allowedDirections.contains(currentSwipeDirection) && isActivelySwiping ? Double(clampedOpacityDrag / maxDragForOpacity) : 0.0
+                    
+                    let maxDragForRotation = geometry.size.width / 2
+                    let isIncoming = currentlySwipingItem?.state == .incoming
+                    let isLeaving = currentlySwipingItem?.state == .leaving
+                    let clampedOffsetWidth = (isIncoming || isLeaving) ? offsetX : min(max(offsetX, -maxDragForRotation), maxDragForRotation)
+                    let rotationMultiplier = isIncoming ? 1.12 : 1.0
+                    let rotationDegrees = Double(clampedOffsetWidth / maxDragForRotation) * viewModel.config.maxRotation * rotationMultiplier
+                    
+                    content(item, isOnTop)
+                        .overlay {
+                            detailOverlay(item)
+                                .opacity(showOverlay && (isOnTop || currentlySwipingItem != nil) ? 0.75 : 0)
+                                .zIndex(1)
+                        }
+                        .overlay {
+                            swipeOverlay(currentSwipeDirection)
+                                .opacity(swipeOverlayOpacity)
+                                .zIndex(2)
+                        }
+                        .zIndex(-Double(index))
+                        .rotationEffect(.degrees(rotationDegrees))
+                        .offset(x: offsetX, y: offsetY)
+                        .highPriorityGesture(
+                            DragGesture()
+                                .updating($dragGestureActive) { value, state, transaction in
+                                    state = true
+                                }
+                                .onChanged({ gesture in
+                                    dragGestureChanged(gesture, isOnTop: isOnTop)
+                                })
+                                .onEnded({ gesture in
+                                    dragGestureEnded(
+                                        gesture,
+                                        geometry: geometry,
+                                        index: index,
+                                        isOnTop: isOnTop
+                                    )
+                                })
+                        )
+                        .gesture(
+                            TapGesture()
+                                .onEnded({
+                                    handleTap()
+                                }),
+                            including: isDragging ? .subviews : .gesture
+                        )
                 }
             }
-            .frame(width: geo.size.width, height: geo.size.height)
-            // Monitor Undo state changes here to trigger the callback
-            .onChange(of: manager.undoItem?.item.id) { _, newValue in
-                // If undoItem is set, an undo action just started
-                if newValue != nil, let item = manager.undoItem?.item {
-                    onUndoAction?(item)
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            .onChange(of: geometry.size) { _, newValue in
+                viewModel.viewSize = newValue
+            }
+            .onChange(of: dragGestureActive) { _, isActive in
+                if !isActive && isDragging {
+                    dragGestureCancelled()
                 }
             }
         }
     }
 }
 
-// MARK: - Convenience Extension
-
-public extension Deck where Content == EmptyView, Overlay == EmptyView, Detail == EmptyView {
+// MARK: Private functions
+extension Deck {
+    private func handleTap() {
+        guard canTap, !isDragging else { return }
+        
+        canTap = false
+        
+        viewModel.handleTap()
+        
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 130_000_000)
+            if !Task.isCancelled {
+                canTap = true
+            }
+        }
+    }
     
-    /// Initializes a generic `Deck` with no content, overlays, or details.
-    ///
-    /// Use the modifier methods `.content()`, `.overlay()`, and `.detail()` to populate the views.
-    init(items: [Item], manager: DeckViewModel<Item>) {
-        self.init(
-            items: items,
-            manager: manager,
-            content: { _, _ in EmptyView() },
-            overlay: { _ in EmptyView() },
-            detail: { _ in EmptyView() },
-            allowedDirections: DeckConfiguration.allowedDirections,
-            hasDetailView: false
-        )
+    private func dragGestureChanged(_ gesture: DragGesture.Value, isOnTop: Bool) {
+        guard isOnTop else { return }
+        isDragging = true
+        
+        let isHorizontal = abs(gesture.translation.width) > abs(gesture.translation.height)
+        lastSwipeDirection = isHorizontal
+        ? (gesture.translation.width > 0 ? .right : .left)
+        : (gesture.translation.height > 0 ? .down : .up)
+        
+        if dragTask == nil {
+            dragTask = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        withAnimation {
+                            showOverlay = true
+                        }
+                    }
+                }
+            }
+        }
+        
+        dragOffset = gesture.translation
+    }
+    
+    private func dragGestureEnded(_ gesture: _ChangedGesture<DragGesture>.Value, geometry: GeometryProxy, index: Int, isOnTop: Bool) {
+        withAnimation {
+            showOverlay = false
+        }
+        canTap = true
+        dragTask?.cancel()
+        dragTask = nil
+        
+        guard isOnTop else {
+            isDragging = false
+            return
+        }
+        
+        if abs(gesture.predictedEndTranslation.width) >= geometry.size.width * viewModel.config.dragThreshold || abs(gesture.predictedEndTranslation.height) >= geometry.size.width * viewModel.config.dragThreshold {
+            let dx = gesture.predictedEndTranslation.width
+            let dy = gesture.predictedEndTranslation.height
+            
+            let vectorLength = max(sqrt(dx * dx + dy * dy), 1)
+            
+            let offScreenDistance = max(geometry.size.width, geometry.size.height) * 1.5
+            let finalPoint = CGPoint(
+                x: (dx / vectorLength) * offScreenDistance,
+                y: (dy / vectorLength) * offScreenDistance
+            )
+            
+            let isHorizontal = abs(gesture.translation.width) > abs(gesture.translation.height)
+            let direction: SwipeDirection = isHorizontal
+            ? (gesture.translation.width > 0 ? .right : .left)
+            : (gesture.translation.height > 0 ? .down : .up)
+            
+            guard allowedDirections.contains(direction) else {
+                withAnimation(viewModel.config.animation) {
+                    isDragging = false
+                    dragOffset = .zero
+                }
+                return
+            }
+            
+            isDragging = false
+            viewModel.handleSwipeEnd(for: direction, at: index, from: gesture.translation, to: finalPoint)
+            
+            dragOffset = .zero
+        } else {
+            withAnimation(viewModel.config.animation) {
+                isDragging = false
+                dragOffset = .zero
+            }
+        }
+    }
+    
+    private func dragGestureCancelled() {
+        canTap = true
+        dragTask?.cancel()
+        dragTask = nil
+        withAnimation(viewModel.config.animation) {
+            isDragging = false
+            showOverlay = false
+            dragOffset = .zero
+        }
     }
 }

@@ -6,175 +6,231 @@
 //
 
 import SwiftUI
-import Observation
 
-/// The engine that drives the `Deck`.
+/// The view model responsible for managing the state, indices, and swipe logic of the `Deck`.
 ///
-/// This class manages the array of items, the current index, the undo history, and the state of cards currently animating off-screen.
+/// `DeckViewModel` keeps track of which items have been swiped, the current top item, and coordinates
+/// the animations for cards entering and leaving the screen.
 ///
-/// **Usage:**
+/// Example:
 /// ```swift
-/// @State private var viewModel = DeckViewModel<Profile>()
-///
-/// // Later in the view
-/// Deck(items: profiles, manager: viewModel)
+/// let items = [Profile(name: "Alice"), Profile(name: "Bob")]
+/// let viewModel = DeckViewModel(items: items)
 /// ```
-@Observable
-public final class DeckViewModel<Item: Identifiable & Equatable & Sendable> where Item.ID: Sendable {
+@MainActor @Observable public class DeckViewModel<Item>
+where Item: Identifiable & Equatable {
+    private(set) var items: [Item]
+    @ObservationIgnored let config: DeckConfig
     
-    // MARK: - Properties
-    
-    /// The complete list of items in the deck.
-    ///
-    /// This is the source of truth. Items are not removed from this array during swiping;
-    /// instead, `currentIndex` is incremented.
-    public var cards: [Item] = []
-    
-    /// The index of the card currently at the top of the stack.
     public var currentIndex: Int = 0
+    private(set) var shownItems = [(item: Item, index: Int)]()
     
-    /// A set of IDs representing cards that are currently in the process of animating off-screen.
-    /// This prevents them from disappearing instantly when `currentIndex` changes.
-    public var exitingCardIds: Set<Item.ID> = []
-    
-    /// If true, user interactions (swipes/drags) are temporarily disabled.
-    public var isLocked: Bool = false
-    
-    /// The live offset of the top card being dragged.
-    ///
-    /// This is exposed so that background cards can react (e.g., scaling up) based on the drag distance.
-    public var currentDragOffset: CGSize = .zero
-    
-    // MARK: - Internal State
-    
-    /// A stack of historical actions used to perform Undo operations.
-    private var swipeHistory: [(index: Int, direction: SwipeDirection, lastOffset: CGSize)] = []
-    
-    /// Tracks programmatic swipe requests triggered by buttons.
-    var pendingSwipe: [Item.ID: SwipeDirection] = [:]
-    
-    /// Stores the item currently being restored via Undo to manage its transition.
-    var undoItem: (item: Item, offset: CGSize)? = nil
-    
-    /// Timestamp of the last button action, used for throttling.
-    private var lastActionTime: Date = .distantPast
-    
-    // MARK: - Initialization
-    
-    /// Initializes a new manager.
-    /// - Parameter items: The initial array of items to display.
-    public init(items: [Item] = []) {
-        self.cards = items
-    }
-    
-    // MARK: - Computed Properties
-    
-    /// Calculates which cards should be physically rendered by the SwiftUI View.
-    ///
-    /// This includes:
-    /// 1. The current top card.
-    /// 2. The next few cards (up to `DeckConfiguration.visibleCount`).
-    /// 3. Any cards currently animating off the screen.
-    public var renderableCards: [(item: Item, index: Int)] {
-        guard currentIndex < cards.count else { return [] }
-
-        // 1. Exiting Cards
-        // Optimization: Only scan the cards BEFORE the current index (O(N) but on a smaller subset).
-        // These are cards that have been swiped but are still animating away.
-        let exitingItems: [(Item, Int)] = cards.prefix(currentIndex)
-            .enumerated()
-            .filter { exitingCardIds.contains($0.element.id) }
-            .map { ($0.element, $0.offset) }
-
-        // 2. Visible Window
-        // Optimization: Use direct slice access (O(1)) instead of searching.
-        // We use .indices on the slice to get the absolute index in the main array.
-        let endIndex = min(currentIndex + DeckConfiguration.visibleCount, cards.count)
-        let visibleItems: [(Item, Int)] = cards[currentIndex..<endIndex]
-            .indices
-            .map { (cards[$0], $0) }
-
-        // 3. Combine
-        // Exiting cards (lower indices) + Visible cards (higher indices)
-        // This preserves Z-order without needing a .sorted() call.
-        return exitingItems + visibleItems
-    }
-    
-    /// Returns the item currently at the top of the stack, or `nil` if the stack is exhausted.
-    public var topCard: Item? {
-        guard currentIndex < cards.count else { return nil }
-        return cards[currentIndex]
-    }
-    
-    // MARK: - Methods
-    
-    /// Determines if a specific item is the active top card and interaction is allowed.
-    public func canInteract(with item: Item) -> Bool {
-        return !isLocked && topCard?.id == item.id
-    }
-    
-    /// Internal helper to throttle button presses.
-    private func canPerformAction() -> Bool {
-        let now = Date()
-        if now.timeIntervalSince(lastActionTime) >= DeckConfiguration.buttonActionInterval {
-            lastActionTime = now
-            return true
-        }
-        return false
-    }
-    
-    /// Programmatically swipes the top card in the specified direction.
-    ///
-    /// - Parameter direction: The direction to swipe.
-    @MainActor
-    public func swipe(_ direction: SwipeDirection) {
-        if let top = topCard, !isLocked, canPerformAction() {
-            pendingSwipe[top.id] = direction
-        }
-    }
-    
-    /// Reverses the last swipe action, bringing the card back to the top of the stack.
-    @MainActor
-    public func undo() {
-        guard canPerformAction(), let lastAction = swipeHistory.popLast() else { return }
-        
-        withAnimation {
-            currentIndex = lastAction.index
-        }
-        
-        let item = cards[currentIndex]
-        undoItem = (item, lastAction.lastOffset)
-    }
-    
-    /// Internal method triggered when a card begins its exit animation.
-    ///
-    /// This locks the stack briefly, updates indices, and manages the `exitingCardIds` set.
-    @MainActor
-    public func startExiting(_ item: Item, direction: SwipeDirection, finalOffset: CGSize) {
-        isLocked = true
-        exitingCardIds.insert(item.id)
-        
-        swipeHistory.append((index: currentIndex, direction: direction, lastOffset: finalOffset))
-        pendingSwipe.removeValue(forKey: item.id)
-        
-        withAnimation {
-            currentIndex += 1
-        }
-        
-        // Briefly lock interaction to prevent accidental double-swipes
-        Task {
-            try? await Task.sleep(nanoseconds: UInt64(DeckConfiguration.swipeThrottleDelay * 1_000_000_000))
-            await MainActor.run { isLocked = false }
-        }
-        
-        // Remove from exiting set after animation completes
-        Task {
-            let id = item.id
-            try? await Task.sleep(nanoseconds: 550_000_000)
-            _ = await MainActor.run {
-                exitingCardIds.remove(id)
+    // MARK: Internal
+    internal var internalIndex: Int? = 0 {
+        didSet {
+            withAnimation {
+                currentIndex = internalIndex ?? (items.count - 1)
             }
         }
+    }
+    internal var currentlySwipingItems = [(
+        index: Int,
+        direction: SwipeDirection,
+        state: SwipeState,
+        currentTranslation: CGSize,
+        predictedEnd: CGPoint,
+        task: Task<Void, Never>?
+    )]()
+    @ObservationIgnored internal var swipedItems = [(item: Item, direction: SwipeDirection)]()
+    @ObservationIgnored internal var viewSize: CGSize?
+    @ObservationIgnored internal var onSwipe: ((Item, SwipeDirection) -> Void)?
+    @ObservationIgnored internal var onUndo: ((Item) -> Void)?
+    
+    /// Creates a new view model to manage a `Deck`.
+    /// - Parameters:
+    ///   - items: The array of identifiable items to display in the deck.
+    ///   - config: The configuration defining the physical behavior of the deck. Defaults to standard values.
+    public init(items: [Item], config: DeckConfig = DeckConfig()) {
+        self.items = items
+        self.config = config
+        
+        calculateShownItems()
+    }
+}
+
+// MARK: Public functions
+extension DeckViewModel {
+    /// Programmatically swipes the current top card in the specified direction.
+    ///
+    /// Useful for tying swipe actions to external buttons.
+    ///
+    /// Example:
+    /// ```swift
+    /// Button("Swipe Left") {
+    ///     viewModel.swipe(.left)
+    /// }
+    /// ```
+    /// - Parameter direction: The `SwipeDirection` to animate the card towards.
+    public func swipe(_ direction: SwipeDirection) {
+        guard let internalIndex else { return }
+        guard internalIndex < items.count else { return }
+        
+        let viewWidth = viewSize?.width ?? 1000
+        let viewHeight = viewSize?.height ?? 1000
+        
+        let offScreenDistance = max(viewWidth, viewHeight) * 1.5
+        
+        let x: CGFloat = direction == .right ? offScreenDistance : direction == .left ? -offScreenDistance : 0
+        let y: CGFloat = (direction == .down ? offScreenDistance : direction == .up ? -offScreenDistance : 0) + 150
+        
+        let finalPoint = CGPoint(x: x, y: y)
+        
+        handleSwipeEnd(for: direction, at: internalIndex, from: .zero, to: finalPoint)
+    }
+    
+    /// Programmatically undoes the last swiped card.
+    ///
+    /// Useful for tying swipe actions to external buttons.
+    ///
+    /// Example:
+    /// ```swift
+    /// Button("Undo") {
+    ///     viewModel.undo()
+    /// }
+    /// ```
+    public func undo() {
+        handleTap()
+    }
+}
+
+// MARK: Internal functions
+extension DeckViewModel {
+    internal func handleSwipeEnd(for direction: SwipeDirection, at index: Int, from translation: CGSize, to endPoint: CGPoint) {
+        onSwipe?(items[index], direction)
+        swipedItems.append((item: items[index], direction))
+        
+        internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
+        
+        let cleanupTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self = self, !Task.isCancelled else { return }
+            
+            if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == index }) {
+                if self.currentlySwipingItems[idx].state == .leaving {
+                    self.currentlySwipingItems.remove(at: idx)
+                    self.calculateShownItems()
+                }
+            }
+        }
+        
+        if let existingIndex = currentlySwipingItems.firstIndex(where: { $0.index == index }) {
+            currentlySwipingItems[existingIndex].task?.cancel()
+            currentlySwipingItems[existingIndex].direction = direction
+            currentlySwipingItems[existingIndex].state = .leaving
+            currentlySwipingItems[existingIndex].predictedEnd = endPoint
+            currentlySwipingItems[existingIndex].task = cleanupTask
+        } else {
+            currentlySwipingItems.append((index: index, direction: direction, state: .leaving, currentTranslation: translation, predictedEnd: endPoint, task: cleanupTask))
+        }
+        
+        calculateShownItems()
+        
+        withAnimation(.easeInOut(duration: 0.33)) {
+            if let idx = currentlySwipingItems.firstIndex(where: { $0.index == index }) {
+                currentlySwipingItems[idx].currentTranslation = .init(width: endPoint.x, height: endPoint.y)
+            }
+        }
+    }
+    
+    internal func handleTap() {
+        guard let swipedItem = swipedItems.popLast() else { return }
+        onUndo?(swipedItem.item)
+        
+        let incomingIndex = max((internalIndex ?? items.count) - 1, 0)
+        internalIndex = incomingIndex
+        
+        let cleanupTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self = self, !Task.isCancelled else { return }
+            
+            if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
+                self.currentlySwipingItems.remove(at: idx)
+                self.calculateShownItems()
+            }
+        }
+        
+        if let existingIndex = currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
+            currentlySwipingItems[existingIndex].task?.cancel()
+            currentlySwipingItems[existingIndex].state = .incoming
+            currentlySwipingItems[existingIndex].task = cleanupTask
+            
+            calculateShownItems()
+            
+            withAnimation(config.animation) {
+                currentlySwipingItems[existingIndex].currentTranslation = .zero
+            }
+            
+        } else {
+            let viewWidth = viewSize?.width ?? 1000
+            let viewHeight = viewSize?.height ?? 1000
+            
+            let offScreenDistance = max(viewWidth, viewHeight) * 1.5
+            
+            let x: CGFloat = swipedItem.direction == .right ? offScreenDistance : swipedItem.direction == .left ? -offScreenDistance : 0
+            let y: CGFloat = (swipedItem.direction == .down ? offScreenDistance : swipedItem.direction == .up ? -offScreenDistance : 0) + 150
+            
+            currentlySwipingItems.append((
+                index: incomingIndex,
+                direction: swipedItem.direction,
+                state: .incoming,
+                currentTranslation: .init(width: x, height: y),
+                predictedEnd: .zero,
+                task: cleanupTask
+            ))
+            
+            calculateShownItems()
+            
+            DispatchQueue.main.async {
+                withAnimation(self.config.undoAnimation) {
+                    if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
+                        self.currentlySwipingItems[idx].currentTranslation = .zero
+                    }
+                }
+            }
+        }
+    }
+    
+    internal func calculateShownItems() {
+        guard !items.isEmpty else {
+            shownItems = []
+            return
+        }
+        
+        var visibleIndices = Set<Int>()
+        
+        if let internalIndex {
+            if internalIndex < items.count {
+                visibleIndices.insert(internalIndex)
+                
+                if internalIndex + 1 < items.count {
+                    visibleIndices.insert(internalIndex + 1)
+                }
+            }
+        }
+        
+        for swipingItem in currentlySwipingItems {
+            visibleIndices.insert(swipingItem.index)
+            
+            if swipingItem.state == .incoming {
+                visibleIndices.insert(swipingItem.index + 1)
+            }
+        }
+        
+        let sortedIndices = visibleIndices
+            .filter { $0 >= 0 && $0 < items.count }
+            .sorted()
+        
+        shownItems = sortedIndices.map { (item: items[$0], index: $0) }
     }
 }
 
