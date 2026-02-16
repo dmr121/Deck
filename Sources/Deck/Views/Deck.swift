@@ -38,8 +38,8 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
     private let onSwipe: ((Item, SwipeDirection) -> Void)?
     private let onUndo: ((Item) -> Void)?
     private let content: (Item, Bool) -> Content
-    private let detailOverlay: (Item) -> DetailOverlay
-    private let swipeOverlay: (SwipeDirection) -> SwipeOverlay
+    @ViewBuilder private var detailOverlay: (Item) -> DetailOverlay
+    @ViewBuilder let swipeOverlay: (SwipeDirection) -> SwipeOverlay
     
     @State private var dragOffset: CGSize = .zero
     @GestureState private var dragGestureActive = false
@@ -64,8 +64,8 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
         onSwipe: ((Item, SwipeDirection) -> Void)? = nil,
         onUndo: ((Item) -> Void)? = nil,
         content: @escaping (Item, Bool) -> Content,
-        detailOverlay: @escaping (Item) -> DetailOverlay,
-        swipeOverlay: @escaping (SwipeDirection) -> SwipeOverlay
+        @ViewBuilder detailOverlay: @escaping (Item) -> DetailOverlay,
+        @ViewBuilder swipeOverlay: @escaping (SwipeDirection) -> SwipeOverlay
     ) {
         self.allowedDirections = directions
         self.viewModel = viewModel
@@ -111,44 +111,45 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     let rotationMultiplier = isIncoming ? 1.12 : 1.0
                     let rotationDegrees = Double(clampedOffsetWidth / maxDragForRotation) * viewModel.config.maxRotation * rotationMultiplier
                     
-                    content(item, isOnTop)
-                        .overlay {
-                            detailOverlay(item)
-                                .opacity(showOverlay && (isOnTop || currentlySwipingItem != nil) ? 0.75 : 0)
-                                .zIndex(1)
-                        }
-                        .overlay {
-                            swipeOverlay(currentSwipeDirection)
-                                .opacity(swipeOverlayOpacity)
-                                .zIndex(2)
-                        }
-                        .zIndex(-Double(index))
-                        .rotationEffect(.degrees(rotationDegrees))
-                        .offset(x: offsetX, y: offsetY)
-                        .highPriorityGesture(
-                            DragGesture()
-                                .updating($dragGestureActive) { value, state, transaction in
-                                    state = true
-                                }
-                                .onChanged({ gesture in
-                                    dragGestureChanged(gesture, isOnTop: isOnTop)
-                                })
-                                .onEnded({ gesture in
-                                    dragGestureEnded(
-                                        gesture,
-                                        geometry: geometry,
-                                        index: index,
-                                        isOnTop: isOnTop
-                                    )
-                                })
-                        )
-                        .gesture(
-                            TapGesture()
-                                .onEnded({
-                                    handleTap()
-                                }),
-                            including: isDragging ? .subviews : .gesture
-                        )
+                    ZStack {
+                        content(item, isOnTop)
+                            .zIndex(0)
+                        
+                        detailOverlay(item)
+                            .opacity(showOverlay && (isOnTop || currentlySwipingItem != nil) ? 1 : 0)
+                            .zIndex(1)
+                        
+                        swipeOverlay(currentSwipeDirection)
+                            .opacity(swipeOverlayOpacity)
+                            .zIndex(2)
+                    }
+                    .zIndex(-Double(index))
+                    .rotationEffect(.degrees(rotationDegrees))
+                    .offset(x: offsetX, y: offsetY)
+                    .highPriorityGesture(
+                        DragGesture()
+                            .updating($dragGestureActive) { value, state, transaction in
+                                state = true
+                            }
+                            .onChanged({ gesture in
+                                dragGestureChanged(gesture, isOnTop: isOnTop)
+                            })
+                            .onEnded({ gesture in
+                                dragGestureEnded(
+                                    gesture,
+                                    geometry: geometry,
+                                    index: index,
+                                    isOnTop: isOnTop
+                                )
+                            })
+                    )
+                    .gesture(
+                        TapGesture()
+                            .onEnded({
+                                handleTap()
+                            }),
+                        including: isDragging ? .subviews : .gesture
+                    )
                 }
             }
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
