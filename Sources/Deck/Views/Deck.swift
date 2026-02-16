@@ -123,9 +123,12 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             .opacity(swipeOverlayOpacity)
                             .zIndex(2)
                     }
+                    .visualEffect { content, geometry in
+                        content
+                            .rotationEffect(.degrees(rotationDegrees))
+                            .offset(x: offsetX, y: offsetY)
+                    }
                     .zIndex(-Double(index))
-                    .rotationEffect(.degrees(rotationDegrees))
-                    .offset(x: offsetX, y: offsetY)
                     .highPriorityGesture(
                         DragGesture()
                             .updating($dragGestureActive) { value, state, transaction in
