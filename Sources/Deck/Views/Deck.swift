@@ -82,17 +82,14 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     let isLeaving = currentlySwipingItem?.state == .leaving
                     
                     let offsetX: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.width : (isOnTop ? dragOffset.width : 0)
-                    let offsetY: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.height : (isOnTop ? dragOffset.height : 0)
+                    let offsetY: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.height : (isOnTop ? dragOffset.height * 0.4 : 0) // Dampened Y-axis
                     let isActivelySwiping = isDragging || currentlySwipingItem != nil
                     
                     let currentSwipeDirection: SwipeDirection = {
                         if !isActivelySwiping { return lastSwipeDirection }
                         let horizontalDirection: SwipeDirection = offsetX > 0 ? .right : .left
-                        let verticalDirection: SwipeDirection = offsetY > 0 ? .down : .up
-                        let isXAxisDominant = abs(offsetX) > abs(offsetY)
-                        let primaryDirection = isXAxisDominant ? horizontalDirection : verticalDirection
-                        let secondaryDirection = isXAxisDominant ? verticalDirection : horizontalDirection
-                        return allowedDirections.contains(primaryDirection) ? primaryDirection : secondaryDirection
+                        // Logic simplified to only care about horizontal
+                        return horizontalDirection
                     }()
                     
                     let swipeOverlayOpacity: Double = {
@@ -116,7 +113,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                         if isLeaving {
                             return 1.0
                         }
-                        return depth == 0 ? 1.0 : 0.95
+                        return depth == 0 ? 1.0 : 0.9
                     }()
                     
                     let cardOpacity: Double = {
@@ -150,7 +147,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     .animation(currentlySwipingItem?.isProgrammatic == true ? viewModel.config.programmaticSwipeAnimation : viewModel.config.swipeOutAnimation, value: cardOpacity)
                     .scaleEffect(cardScale)
                     .transition(isIncoming ? .identity : .asymmetric(
-                        insertion: AnyTransition.opacity.combined(with: .scale(scale: 0.95)).animation(.linear(duration: viewModel.config.fadeInDuration)),
+                        insertion: AnyTransition.opacity.combined(with: .scale(scale: 0.9)).animation(.linear(duration: viewModel.config.fadeInDuration)),
                         removal: .opacity
                     ))
                     .zIndex(-Double(index))
