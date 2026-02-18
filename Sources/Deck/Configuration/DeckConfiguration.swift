@@ -35,6 +35,9 @@ public struct DeckConfig {
     /// The delay in seconds before another card can be undone.
     public let undoDelay: TimeInterval
     
+    /// The duration for the opacity fade-in animation of the new card after a swipe.
+    public let fadeInDuration: TimeInterval
+    
     /// Initializes a new deck configuration.
     /// - Parameters:
     ///   - dragThreshold: The distance required to trigger a swipe, represented as a multiplier of the view's width. Defaults to `0.33`.
@@ -42,14 +45,15 @@ public struct DeckConfig {
     public init(
         dragThreshold: CGFloat = 0.33,
         maxRotation: Double = 20,
-        swipeOutAnimation: Animation = .easeOut(duration: 0.55),
-        programmaticSwipeAnimation: Animation = .spring(response: 0.55, dampingFraction: 0.75),
-        undoAnimation: Animation = .spring(response: 0.36, dampingFraction: 0.78),
-        snapBackAnimation: Animation = .spring(response: 0.3, dampingFraction: 0.6),
-        swipeDuration: TimeInterval = 0.55,
-        undoDuration: TimeInterval = 0.36,
-        swipeDelay: TimeInterval = 0.25,
-        undoDelay: TimeInterval = 0.22
+        swipeOutAnimation: Animation = .easeIn(duration: 0.3),
+        programmaticSwipeAnimation: Animation = .easeIn(duration: 0.33),
+        undoAnimation: Animation = .easeInOut(duration: 0.33),
+        swipeDuration: TimeInterval = 0.45,
+        undoDuration: TimeInterval = 0.48,
+        swipeDelay: TimeInterval = 0.12,
+        undoDelay: TimeInterval = 0.12,
+        fadeInDuration: TimeInterval = 0.2,
+        snapBackAnimation: Animation = .spring(response: 0.3, dampingFraction: 0.7)
     ) {
         self.dragThreshold = dragThreshold
         self.maxRotation = maxRotation
@@ -62,5 +66,6 @@ public struct DeckConfig {
         self.undoDuration = undoDuration
         self.swipeDelay = swipeDelay
         self.undoDelay = undoDelay
+        self.fadeInDuration = fadeInDuration
     }
 }

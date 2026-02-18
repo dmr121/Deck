@@ -147,7 +147,10 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             .offset(x: offsetX, y: offsetY)
                     }
                     .opacity(cardOpacity)
-                    .transition(.opacity)
+                    .transition(isIncoming ? .identity : .asymmetric(
+                        insertion: .opacity.animation(.linear(duration: viewModel.config.fadeInDuration)),
+                        removal: .opacity
+                    ))
                     .zIndex(-Double(index))
                     .highPriorityGesture(
                         DragGesture()

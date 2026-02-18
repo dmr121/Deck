@@ -128,7 +128,9 @@ extension DeckViewModel {
             if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == index }) {
                 if self.currentlySwipingItems[idx].state == .leaving {
                     self.currentlySwipingItems.remove(at: idx)
-                    self.calculateShownItems()
+                    withAnimation(animation) {
+                        self.calculateShownItems()
+                    }
                 }
             }
         }
@@ -163,17 +165,18 @@ extension DeckViewModel {
         let duration: Double = config.undoDuration
         
         let incomingIndex = max((internalIndex ?? items.count) - 1, 0)
-        withAnimation(animation) {
-            internalIndex = incomingIndex
-        }
         
         let cleanupTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             guard let self = self, !Task.isCancelled else { return }
             
             if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
-                self.currentlySwipingItems.remove(at: idx)
-                self.calculateShownItems()
+                if self.currentlySwipingItems[idx].state == .incoming {
+                    self.currentlySwipingItems.remove(at: idx)
+                    withAnimation(animation) {
+                        self.calculateShownItems()
+                    }
+                }
             }
         }
         
@@ -184,6 +187,7 @@ extension DeckViewModel {
             currentlySwipingItems[existingIndex].isProgrammatic = true
             
             withAnimation(animation) {
+                internalIndex = incomingIndex
                 calculateShownItems()
                 currentlySwipingItems[existingIndex].currentTranslation = .zero
             }
@@ -207,12 +211,18 @@ extension DeckViewModel {
                 task: cleanupTask
             ))
             
-            withAnimation(animation) {
-                calculateShownItems()
-            }
+            // Render the card exactly off-screen instantly
+            calculateShownItems()
             
-            DispatchQueue.main.async {
+            // Yield the thread to ensure SwiftUI applies the initial layout state,
+            // then simultaneously update internalIndex and animate the offset to trigger the slide
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                guard let self = self else { return }
+                
                 withAnimation(animation) {
+                    self.internalIndex = incomingIndex
+                    self.calculateShownItems()
                     if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
                         self.currentlySwipingItems[idx].currentTranslation = .zero
                     }
