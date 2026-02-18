@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreFoundation
 
 /// The view model responsible for managing the state, indices, and swipe logic of the `Deck`.
 ///
@@ -45,8 +46,8 @@ where Item: Identifiable & Equatable {
     @ObservationIgnored internal var onSwipe: ((Item, SwipeDirection) -> Void)?
     @ObservationIgnored internal var onUndo: ((Item) -> Void)?
     
-    @ObservationIgnored internal var lastSwipeTime: Date = .distantPast
-    @ObservationIgnored internal var lastUndoTime: Date = .distantPast
+    @ObservationIgnored internal var lastSwipeTime: CFAbsoluteTime = 0
+    @ObservationIgnored internal var lastUndoTime: CFAbsoluteTime = 0
     
     /// Creates a new view model to manage a `Deck`.
     /// - Parameters:
@@ -74,8 +75,9 @@ extension DeckViewModel {
     /// ```
     /// - Parameter direction: The `SwipeDirection` to animate the card towards.
     public func swipe(_ direction: SwipeDirection) {
-        guard Date().timeIntervalSince(lastSwipeTime) >= config.swipeDelay else { return }
-        lastSwipeTime = Date()
+        let currentTime = CFAbsoluteTimeGetCurrent()
+        guard currentTime - lastSwipeTime >= config.swipeDelay else { return }
+        lastSwipeTime = currentTime
         
         guard let internalIndex else { return }
         guard internalIndex < items.count else { return }
@@ -117,18 +119,14 @@ extension DeckViewModel {
         let animation = isProgrammatic ? config.programmaticSwipeAnimation : config.swipeOutAnimation
         let duration: Double = config.swipeDuration
         
-        withAnimation(animation) {
-            internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
-        }
-        
         let cleanupTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             guard let self = self, !Task.isCancelled else { return }
             
             if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == index }) {
                 if self.currentlySwipingItems[idx].state == .leaving {
-                    self.currentlySwipingItems.remove(at: idx)
                     withAnimation(animation) {
+                        self.currentlySwipingItems.remove(at: idx)
                         self.calculateShownItems()
                     }
                 }
@@ -147,6 +145,7 @@ extension DeckViewModel {
         }
         
         withAnimation(animation) {
+            internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
             calculateShownItems()
             if let idx = currentlySwipingItems.firstIndex(where: { $0.index == index }) {
                 currentlySwipingItems[idx].currentTranslation = .init(width: endPoint.x, height: endPoint.y)
@@ -155,8 +154,9 @@ extension DeckViewModel {
     }
     
     internal func handleTap() {
-        guard Date().timeIntervalSince(lastUndoTime) >= config.undoDelay else { return }
-        lastUndoTime = Date()
+        let currentTime = CFAbsoluteTimeGetCurrent()
+        guard currentTime - lastUndoTime >= config.undoDelay else { return }
+        lastUndoTime = currentTime
         
         guard let swipedItem = swipedItems.popLast() else { return }
         onUndo?(swipedItem.item)
@@ -172,8 +172,8 @@ extension DeckViewModel {
             
             if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
                 if self.currentlySwipingItems[idx].state == .incoming {
-                    self.currentlySwipingItems.remove(at: idx)
                     withAnimation(animation) {
+                        self.currentlySwipingItems.remove(at: idx)
                         self.calculateShownItems()
                     }
                 }
@@ -257,6 +257,6 @@ extension DeckViewModel {
             .filter { $0 >= 0 && $0 < items.count }
             .sorted()
         
-        shownItems = Array(sortedIndices.prefix(4)).map { (item: items[$0], index: $0) }
+        shownItems = sortedIndices.prefix(4).map { (item: items[$0], index: $0) }
     }
 }

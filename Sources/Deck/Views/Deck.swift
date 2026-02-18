@@ -253,7 +253,8 @@ extension Deck {
                 return
             }
             
-            guard Date().timeIntervalSince(viewModel.lastSwipeTime) >= viewModel.config.swipeDelay else {
+            let currentTime = CFAbsoluteTimeGetCurrent()
+            guard currentTime - viewModel.lastSwipeTime >= viewModel.config.swipeDelay else {
                 withAnimation(viewModel.config.snapBackAnimation) {
                     isDragging = false
                     dragOffset = .zero
@@ -261,7 +262,7 @@ extension Deck {
                 return
             }
             
-            viewModel.lastSwipeTime = Date()
+            viewModel.lastSwipeTime = currentTime
             
             let finalPoint = CGPoint(
                 x: isHorizontal ? (direction == .right ? offScreenDistance : -offScreenDistance) : 0,
