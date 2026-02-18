@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  tinder test
+//  Deck
 //
 //  Created by David Rozmajzl on 1/29/26.
 //

@@ -1,12 +1,6 @@
 //
 //  Deck.swift
-//  tinder test
-//
-//  Created by David Rozmajzl on 2/3/26.
-//
-//
-//  Deck.swift
-//  tinder test
+//  Deck
 //
 //  Created by David Rozmajzl on 2/3/26.
 //
@@ -44,7 +38,6 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
     @State private var dragOffset: CGSize = .zero
     @GestureState private var dragGestureActive = false
     @State private var isDragging = false
-    @State private var canTap = true
     @State private var dragTask: Task<Void, Never>?
     @State private var showOverlay = false
     @State private var lastSwipeDirection: SwipeDirection = .right
@@ -83,33 +76,56 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
             ZStack {
                 ForEach(viewModel.shownItems, id: \.item.id) { (item, index) in
                     let isOnTop = index == viewModel.internalIndex
+                    let depth = index - (viewModel.internalIndex ?? -1)
                     let currentlySwipingItem = viewModel.currentlySwipingItems.first(where: { $0.index == index })
+                    let isIncoming = currentlySwipingItem?.state == .incoming
+                    let isLeaving = currentlySwipingItem?.state == .leaving
                     
                     let offsetX: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.width : (isOnTop ? dragOffset.width : 0)
                     let offsetY: CGFloat = currentlySwipingItem != nil ? currentlySwipingItem!.currentTranslation.height : (isOnTop ? dragOffset.height : 0)
-                    
-                    let horizontalDirection: SwipeDirection = offsetX > 0 ? .right : .left
-                    let verticalDirection: SwipeDirection = offsetY > 0 ? .down : .up
-                    
-                    let isXAxisDominant = abs(offsetX) > abs(offsetY)
-                    let primaryDirection = isXAxisDominant ? horizontalDirection : verticalDirection
-                    let secondaryDirection = isXAxisDominant ? verticalDirection : horizontalDirection
-                    
-                    let dynamicDirection: SwipeDirection = allowedDirections.contains(primaryDirection) ? primaryDirection : secondaryDirection
                     let isActivelySwiping = isDragging || currentlySwipingItem != nil
-                    let currentSwipeDirection: SwipeDirection = isActivelySwiping ? dynamicDirection : lastSwipeDirection
                     
-                    let activeDrag = (currentSwipeDirection == .left || currentSwipeDirection == .right) ? abs(offsetX) : abs(offsetY)
-                    let maxDragForOpacity = geometry.size.width * viewModel.config.dragThreshold
-                    let clampedOpacityDrag = min(activeDrag, maxDragForOpacity)
-                    let swipeOverlayOpacity: Double = allowedDirections.contains(currentSwipeDirection) && isActivelySwiping ? Double(clampedOpacityDrag / maxDragForOpacity) : 0.0
+                    let currentSwipeDirection: SwipeDirection = {
+                        if !isActivelySwiping { return lastSwipeDirection }
+                        let horizontalDirection: SwipeDirection = offsetX > 0 ? .right : .left
+                        let verticalDirection: SwipeDirection = offsetY > 0 ? .down : .up
+                        let isXAxisDominant = abs(offsetX) > abs(offsetY)
+                        let primaryDirection = isXAxisDominant ? horizontalDirection : verticalDirection
+                        let secondaryDirection = isXAxisDominant ? verticalDirection : horizontalDirection
+                        return allowedDirections.contains(primaryDirection) ? primaryDirection : secondaryDirection
+                    }()
                     
-                    let maxDragForRotation = geometry.size.width / 2
-                    let isIncoming = currentlySwipingItem?.state == .incoming
-                    let isLeaving = currentlySwipingItem?.state == .leaving
-                    let clampedOffsetWidth = (isIncoming || isLeaving) ? offsetX : min(max(offsetX, -maxDragForRotation), maxDragForRotation)
-                    let rotationMultiplier = isIncoming ? 1.12 : 1.0
-                    let rotationDegrees = Double(clampedOffsetWidth / maxDragForRotation) * viewModel.config.maxRotation * rotationMultiplier
+                    let swipeOverlayOpacity: Double = {
+                        guard (isOnTop || isLeaving) && allowedDirections.contains(currentSwipeDirection) && isActivelySwiping else { return 0 }
+                        let activeDragForOpacity = (currentSwipeDirection == .left || currentSwipeDirection == .right) ? abs(offsetX) : abs(offsetY)
+                        let maxDragForOpacity = geometry.size.width * viewModel.config.dragThreshold
+                        let clampedOpacityDrag = min(activeDragForOpacity, maxDragForOpacity)
+                        return Double(clampedOpacityDrag / maxDragForOpacity)
+                    }()
+                    
+                    let rotationDegrees: Double = {
+                        guard isOnTop || isIncoming || isLeaving else { return 0 }
+                        let maxDragForRotation = geometry.size.width / 2
+                        let clampedOffsetWidth = min(max(offsetX, -maxDragForRotation), maxDragForRotation)
+                        return Double(clampedOffsetWidth / maxDragForRotation) * viewModel.config.maxRotation
+                    }()
+                    
+                    let cardOpacity: Double = {
+                        if isLeaving || isIncoming {
+                            let isXAxisDominant = abs(offsetX) > abs(offsetY)
+                            let activeOffset = isXAxisDominant ? abs(offsetX) : abs(offsetY)
+                            
+                            let delayDistance = geometry.size.width * 0.5
+                            let fadeDistance = geometry.size.width * 0.5
+                            
+                            if activeOffset > delayDistance {
+                                let opacity = 1 - Double((activeOffset - delayDistance) / fadeDistance)
+                                return max(0, min(1, opacity))
+                            }
+                            return 1
+                        }
+                        return depth == 0 ? 1 : 0
+                    }()
                     
                     ZStack {
                         content(item, isOnTop)
@@ -128,6 +144,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             .rotationEffect(.degrees(rotationDegrees))
                             .offset(x: offsetX, y: offsetY)
                     }
+                    .opacity(cardOpacity)
                     .zIndex(-Double(index))
                     .highPriorityGesture(
                         DragGesture()
@@ -146,16 +163,17 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                                 )
                             })
                     )
-                    .gesture(
-                        TapGesture()
-                            .onEnded({
-                                handleTap()
-                            }),
-                        including: isDragging ? .subviews : .gesture
-                    )
                 }
             }
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            .contentShape(Rectangle())
+            .gesture(
+                TapGesture()
+                    .onEnded({
+                        handleTap()
+                    }),
+                including: isDragging ? .subviews : .gesture
+            )
             .onChange(of: geometry.size) { _, newValue in
                 viewModel.viewSize = newValue
             }
@@ -171,18 +189,8 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
 // MARK: Private functions
 extension Deck {
     private func handleTap() {
-        guard canTap, !isDragging else { return }
-        
-        canTap = false
-        
+        guard !isDragging else { return }
         viewModel.handleTap()
-        
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 130_000_000)
-            if !Task.isCancelled {
-                canTap = true
-            }
-        }
     }
     
     private func dragGestureChanged(_ gesture: DragGesture.Value, isOnTop: Bool) {
@@ -214,7 +222,6 @@ extension Deck {
         withAnimation {
             showOverlay = false
         }
-        canTap = true
         dragTask?.cancel()
         dragTask = nil
         
@@ -224,16 +231,8 @@ extension Deck {
         }
         
         if abs(gesture.predictedEndTranslation.width) >= geometry.size.width * viewModel.config.dragThreshold || abs(gesture.predictedEndTranslation.height) >= geometry.size.width * viewModel.config.dragThreshold {
-            let dx = gesture.predictedEndTranslation.width
-            let dy = gesture.predictedEndTranslation.height
-            
-            let vectorLength = max(sqrt(dx * dx + dy * dy), 1)
             
             let offScreenDistance = max(geometry.size.width, geometry.size.height) * 1.5
-            let finalPoint = CGPoint(
-                x: (dx / vectorLength) * offScreenDistance,
-                y: (dy / vectorLength) * offScreenDistance
-            )
             
             let isHorizontal = abs(gesture.translation.width) > abs(gesture.translation.height)
             let direction: SwipeDirection = isHorizontal
@@ -241,19 +240,27 @@ extension Deck {
             : (gesture.translation.height > 0 ? .down : .up)
             
             guard allowedDirections.contains(direction) else {
-                withAnimation(viewModel.config.animation) {
+                withAnimation(.easeOut(duration: 0.24)) {
                     isDragging = false
                     dragOffset = .zero
                 }
                 return
             }
             
-            isDragging = false
-            viewModel.handleSwipeEnd(for: direction, at: index, from: gesture.translation, to: finalPoint)
+            let finalPoint = CGPoint(
+                x: isHorizontal ? (direction == .right ? offScreenDistance : -offScreenDistance) : 0,
+                y: !isHorizontal ? (direction == .down ? offScreenDistance : -offScreenDistance) : offScreenDistance * 0.15
+            )
             
+            let currentTranslation = gesture.translation
+            
+            isDragging = false
             dragOffset = .zero
+            
+            viewModel.handleSwipeEnd(for: direction, at: index, from: currentTranslation, to: finalPoint)
+            
         } else {
-            withAnimation(viewModel.config.animation) {
+            withAnimation(.easeInOut(duration: 0.24)) {
                 isDragging = false
                 dragOffset = .zero
             }
@@ -261,10 +268,9 @@ extension Deck {
     }
     
     private func dragGestureCancelled() {
-        canTap = true
         dragTask?.cancel()
         dragTask = nil
-        withAnimation(viewModel.config.animation) {
+        withAnimation(.easeInOut(duration: 0.24)) {
             isDragging = false
             showOverlay = false
             dragOffset = .zero

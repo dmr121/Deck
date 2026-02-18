@@ -24,7 +24,7 @@ public struct DeckConfig {
     ///   - maxRotation: The maximum rotation applied to the card in degrees. Defaults to `15`.
     public init(
         dragThreshold: CGFloat = 0.33,
-        maxRotation: Double = 15,
+        maxRotation: Double = 20,
         animation: Animation = .spring(duration: 0.3, bounce: 0.4),
         undoAnimation: Animation = .spring(duration: 0.48, bounce: 0.24)
     ) {

@@ -1,6 +1,6 @@
 //
 //  DeckViewModel.swift
-//  tinder test
+//  Deck
 //
 //  Created by David Rozmajzl on 2/3/26.
 //
@@ -28,9 +28,7 @@ where Item: Identifiable & Equatable {
     // MARK: Internal
     internal var internalIndex: Int? = 0 {
         didSet {
-            withAnimation {
-                currentIndex = internalIndex ?? (items.count - 1)
-            }
+            currentIndex = internalIndex ?? (items.count - 1)
         }
     }
     internal var currentlySwipingItems = [(
@@ -78,10 +76,10 @@ extension DeckViewModel {
         let viewWidth = viewSize?.width ?? 1000
         let viewHeight = viewSize?.height ?? 1000
         
-        let offScreenDistance = max(viewWidth, viewHeight) * 1.5
+        let offScreenDistance = max(viewWidth, viewHeight) * 1.15
         
         let x: CGFloat = direction == .right ? offScreenDistance : direction == .left ? -offScreenDistance : 0
-        let y: CGFloat = (direction == .down ? offScreenDistance : direction == .up ? -offScreenDistance : 0) + 150
+        let y: CGFloat = direction == .down ? offScreenDistance : direction == .up ? -offScreenDistance : offScreenDistance * 0.15
         
         let finalPoint = CGPoint(x: x, y: y)
         
@@ -109,10 +107,14 @@ extension DeckViewModel {
         onSwipe?(items[index], direction)
         swipedItems.append((item: items[index], direction))
         
-        internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
+        let duration: Double = 0.6
+        
+        withAnimation(.easeOut(duration: duration)) {
+            internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
+        }
         
         let cleanupTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             guard let self = self, !Task.isCancelled else { return }
             
             if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == index }) {
@@ -135,7 +137,7 @@ extension DeckViewModel {
         
         calculateShownItems()
         
-        withAnimation(.easeInOut(duration: 0.33)) {
+        withAnimation(.easeOut(duration: 0.6)) {
             if let idx = currentlySwipingItems.firstIndex(where: { $0.index == index }) {
                 currentlySwipingItems[idx].currentTranslation = .init(width: endPoint.x, height: endPoint.y)
             }
@@ -146,11 +148,15 @@ extension DeckViewModel {
         guard let swipedItem = swipedItems.popLast() else { return }
         onUndo?(swipedItem.item)
         
+        let duration: Double = 0.6
+        
         let incomingIndex = max((internalIndex ?? items.count) - 1, 0)
-        internalIndex = incomingIndex
+        withAnimation(.easeOut(duration: duration)) {
+            internalIndex = incomingIndex
+        }
         
         let cleanupTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             guard let self = self, !Task.isCancelled else { return }
             
             if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
@@ -166,7 +172,7 @@ extension DeckViewModel {
             
             calculateShownItems()
             
-            withAnimation(config.animation) {
+            withAnimation(.easeOut(duration: duration)) {
                 currentlySwipingItems[existingIndex].currentTranslation = .zero
             }
             
@@ -174,10 +180,10 @@ extension DeckViewModel {
             let viewWidth = viewSize?.width ?? 1000
             let viewHeight = viewSize?.height ?? 1000
             
-            let offScreenDistance = max(viewWidth, viewHeight) * 1.5
+            let offScreenDistance = max(viewWidth, viewHeight) * 1.15
             
             let x: CGFloat = swipedItem.direction == .right ? offScreenDistance : swipedItem.direction == .left ? -offScreenDistance : 0
-            let y: CGFloat = (swipedItem.direction == .down ? offScreenDistance : swipedItem.direction == .up ? -offScreenDistance : 0) + 150
+            let y: CGFloat = swipedItem.direction == .down ? offScreenDistance : swipedItem.direction == .up ? -offScreenDistance : offScreenDistance * 0.15
             
             currentlySwipingItems.append((
                 index: incomingIndex,
@@ -191,7 +197,7 @@ extension DeckViewModel {
             calculateShownItems()
             
             DispatchQueue.main.async {
-                withAnimation(self.config.undoAnimation) {
+                withAnimation(.easeOut(duration: duration)) {
                     if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
                         self.currentlySwipingItems[idx].currentTranslation = .zero
                     }
@@ -230,7 +236,6 @@ extension DeckViewModel {
             .filter { $0 >= 0 && $0 < items.count }
             .sorted()
         
-        shownItems = sortedIndices.map { (item: items[$0], index: $0) }
+        shownItems = Array(sortedIndices.prefix(4)).map { (item: items[$0], index: $0) }
     }
 }
-
