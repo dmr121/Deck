@@ -112,8 +112,15 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                         return Double(clampedOffsetWidth / maxDragForRotation) * maxRot
                     }()
                     
+                    let cardScale: Double = {
+                        if isLeaving {
+                            return 1.0
+                        }
+                        return depth == 0 ? 1.0 : 0.95
+                    }()
+                    
                     let cardOpacity: Double = {
-                        if isLeaving || isIncoming {
+                        if isLeaving || isOnTop {
                             let isXAxisDominant = abs(offsetX) > abs(offsetY)
                             let activeOffset = isXAxisDominant ? abs(offsetX) : abs(offsetY)
                             
@@ -147,8 +154,9 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             .offset(x: offsetX, y: offsetY)
                     }
                     .opacity(cardOpacity)
+                    .scaleEffect(cardScale)
                     .transition(isIncoming ? .identity : .asymmetric(
-                        insertion: .opacity.animation(.linear(duration: viewModel.config.fadeInDuration)),
+                        insertion: AnyTransition.opacity.combined(with: .scale(scale: 0.95)).animation(.linear(duration: viewModel.config.fadeInDuration)),
                         removal: .opacity
                     ))
                     .zIndex(-Double(index))
