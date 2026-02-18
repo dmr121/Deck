@@ -107,7 +107,9 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                         guard isOnTop || isIncoming || isLeaving else { return 0 }
                         let maxDragForRotation = geometry.size.width / 2
                         let clampedOffsetWidth = min(max(offsetX, -maxDragForRotation), maxDragForRotation)
-                        return Double(clampedOffsetWidth / maxDragForRotation) * viewModel.config.maxRotation
+                        let isProg = currentlySwipingItem?.isProgrammatic == true
+                        let maxRot = isProg ? viewModel.config.programmaticMaxRotation : viewModel.config.maxRotation
+                        return Double(clampedOffsetWidth / maxDragForRotation) * maxRot
                     }()
                     
                     let cardOpacity: Double = {
@@ -115,8 +117,8 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             let isXAxisDominant = abs(offsetX) > abs(offsetY)
                             let activeOffset = isXAxisDominant ? abs(offsetX) : abs(offsetY)
                             
-                            let delayDistance = geometry.size.width * 0.5
-                            let fadeDistance = geometry.size.width * 0.5
+                            let delayDistance = geometry.size.width * 0.1
+                            let fadeDistance = geometry.size.width * 0.6
                             
                             if activeOffset > delayDistance {
                                 let opacity = 1 - Double((activeOffset - delayDistance) / fadeDistance)
@@ -145,6 +147,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             .offset(x: offsetX, y: offsetY)
                     }
                     .opacity(cardOpacity)
+                    .transition(.opacity)
                     .zIndex(-Double(index))
                     .highPriorityGesture(
                         DragGesture()
@@ -240,12 +243,22 @@ extension Deck {
             : (gesture.translation.height > 0 ? .down : .up)
             
             guard allowedDirections.contains(direction) else {
-                withAnimation(.easeOut(duration: 0.24)) {
+                withAnimation(viewModel.config.snapBackAnimation) {
                     isDragging = false
                     dragOffset = .zero
                 }
                 return
             }
+            
+            guard Date().timeIntervalSince(viewModel.lastSwipeTime) >= viewModel.config.swipeDelay else {
+                withAnimation(viewModel.config.snapBackAnimation) {
+                    isDragging = false
+                    dragOffset = .zero
+                }
+                return
+            }
+            
+            viewModel.lastSwipeTime = Date()
             
             let finalPoint = CGPoint(
                 x: isHorizontal ? (direction == .right ? offScreenDistance : -offScreenDistance) : 0,
@@ -257,10 +270,10 @@ extension Deck {
             isDragging = false
             dragOffset = .zero
             
-            viewModel.handleSwipeEnd(for: direction, at: index, from: currentTranslation, to: finalPoint)
+            viewModel.handleSwipeEnd(for: direction, at: index, from: currentTranslation, to: finalPoint, isProgrammatic: false)
             
         } else {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(viewModel.config.snapBackAnimation) {
                 isDragging = false
                 dragOffset = .zero
             }
@@ -270,7 +283,7 @@ extension Deck {
     private func dragGestureCancelled() {
         dragTask?.cancel()
         dragTask = nil
-        withAnimation(.easeInOut(duration: 0.24)) {
+        withAnimation(viewModel.config.snapBackAnimation) {
             isDragging = false
             showOverlay = false
             dragOffset = .zero

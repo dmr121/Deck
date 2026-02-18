@@ -37,12 +37,16 @@ where Item: Identifiable & Equatable {
         state: SwipeState,
         currentTranslation: CGSize,
         predictedEnd: CGPoint,
+        isProgrammatic: Bool,
         task: Task<Void, Never>?
     )]()
     @ObservationIgnored internal var swipedItems = [(item: Item, direction: SwipeDirection)]()
     @ObservationIgnored internal var viewSize: CGSize?
     @ObservationIgnored internal var onSwipe: ((Item, SwipeDirection) -> Void)?
     @ObservationIgnored internal var onUndo: ((Item) -> Void)?
+    
+    @ObservationIgnored internal var lastSwipeTime: Date = .distantPast
+    @ObservationIgnored internal var lastUndoTime: Date = .distantPast
     
     /// Creates a new view model to manage a `Deck`.
     /// - Parameters:
@@ -70,6 +74,9 @@ extension DeckViewModel {
     /// ```
     /// - Parameter direction: The `SwipeDirection` to animate the card towards.
     public func swipe(_ direction: SwipeDirection) {
+        guard Date().timeIntervalSince(lastSwipeTime) >= config.swipeDelay else { return }
+        lastSwipeTime = Date()
+        
         guard let internalIndex else { return }
         guard internalIndex < items.count else { return }
         
@@ -83,7 +90,7 @@ extension DeckViewModel {
         
         let finalPoint = CGPoint(x: x, y: y)
         
-        handleSwipeEnd(for: direction, at: internalIndex, from: .zero, to: finalPoint)
+        handleSwipeEnd(for: direction, at: internalIndex, from: .zero, to: finalPoint, isProgrammatic: true)
     }
     
     /// Programmatically undoes the last swiped card.
@@ -103,13 +110,14 @@ extension DeckViewModel {
 
 // MARK: Internal functions
 extension DeckViewModel {
-    internal func handleSwipeEnd(for direction: SwipeDirection, at index: Int, from translation: CGSize, to endPoint: CGPoint) {
+    internal func handleSwipeEnd(for direction: SwipeDirection, at index: Int, from translation: CGSize, to endPoint: CGPoint, isProgrammatic: Bool = false) {
         onSwipe?(items[index], direction)
         swipedItems.append((item: items[index], direction))
         
-        let duration: Double = 0.6
+        let animation = isProgrammatic ? config.programmaticSwipeAnimation : config.swipeOutAnimation
+        let duration: Double = config.swipeDuration
         
-        withAnimation(.easeOut(duration: duration)) {
+        withAnimation(animation) {
             internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
         }
         
@@ -130,14 +138,14 @@ extension DeckViewModel {
             currentlySwipingItems[existingIndex].direction = direction
             currentlySwipingItems[existingIndex].state = .leaving
             currentlySwipingItems[existingIndex].predictedEnd = endPoint
+            currentlySwipingItems[existingIndex].isProgrammatic = isProgrammatic
             currentlySwipingItems[existingIndex].task = cleanupTask
         } else {
-            currentlySwipingItems.append((index: index, direction: direction, state: .leaving, currentTranslation: translation, predictedEnd: endPoint, task: cleanupTask))
+            currentlySwipingItems.append((index: index, direction: direction, state: .leaving, currentTranslation: translation, predictedEnd: endPoint, isProgrammatic: isProgrammatic, task: cleanupTask))
         }
         
-        calculateShownItems()
-        
-        withAnimation(.easeOut(duration: 0.6)) {
+        withAnimation(animation) {
+            calculateShownItems()
             if let idx = currentlySwipingItems.firstIndex(where: { $0.index == index }) {
                 currentlySwipingItems[idx].currentTranslation = .init(width: endPoint.x, height: endPoint.y)
             }
@@ -145,13 +153,17 @@ extension DeckViewModel {
     }
     
     internal func handleTap() {
+        guard Date().timeIntervalSince(lastUndoTime) >= config.undoDelay else { return }
+        lastUndoTime = Date()
+        
         guard let swipedItem = swipedItems.popLast() else { return }
         onUndo?(swipedItem.item)
         
-        let duration: Double = 0.6
+        let animation = config.undoAnimation
+        let duration: Double = config.undoDuration
         
         let incomingIndex = max((internalIndex ?? items.count) - 1, 0)
-        withAnimation(.easeOut(duration: duration)) {
+        withAnimation(animation) {
             internalIndex = incomingIndex
         }
         
@@ -169,10 +181,10 @@ extension DeckViewModel {
             currentlySwipingItems[existingIndex].task?.cancel()
             currentlySwipingItems[existingIndex].state = .incoming
             currentlySwipingItems[existingIndex].task = cleanupTask
+            currentlySwipingItems[existingIndex].isProgrammatic = true
             
-            calculateShownItems()
-            
-            withAnimation(.easeOut(duration: duration)) {
+            withAnimation(animation) {
+                calculateShownItems()
                 currentlySwipingItems[existingIndex].currentTranslation = .zero
             }
             
@@ -191,13 +203,16 @@ extension DeckViewModel {
                 state: .incoming,
                 currentTranslation: .init(width: x, height: y),
                 predictedEnd: .zero,
+                isProgrammatic: true,
                 task: cleanupTask
             ))
             
-            calculateShownItems()
+            withAnimation(animation) {
+                calculateShownItems()
+            }
             
             DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: duration)) {
+                withAnimation(animation) {
                     if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == incomingIndex }) {
                         self.currentlySwipingItems[idx].currentTranslation = .zero
                     }
@@ -217,10 +232,6 @@ extension DeckViewModel {
         if let internalIndex {
             if internalIndex < items.count {
                 visibleIndices.insert(internalIndex)
-                
-                if internalIndex + 1 < items.count {
-                    visibleIndices.insert(internalIndex + 1)
-                }
             }
         }
         
