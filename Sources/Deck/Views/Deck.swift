@@ -120,17 +120,10 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     }()
                     
                     let cardOpacity: Double = {
-                        if isLeaving || isOnTop {
-                            let isXAxisDominant = abs(offsetX) > abs(offsetY)
-                            let activeOffset = isXAxisDominant ? abs(offsetX) : abs(offsetY)
-                            
-                            let delayDistance = geometry.size.width * 0.1
-                            let fadeDistance = geometry.size.width * 0.6
-                            
-                            if activeOffset > delayDistance {
-                                let opacity = 1 - Double((activeOffset - delayDistance) / fadeDistance)
-                                return max(0, min(1, opacity))
-                            }
+                        if isLeaving {
+                            return 0
+                        }
+                        if isIncoming {
                             return 1
                         }
                         return depth == 0 ? 1 : 0
@@ -154,6 +147,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                             .offset(x: offsetX, y: offsetY)
                     }
                     .opacity(cardOpacity)
+                    .animation(currentlySwipingItem?.isProgrammatic == true ? viewModel.config.programmaticSwipeAnimation : viewModel.config.swipeOutAnimation, value: cardOpacity)
                     .scaleEffect(cardScale)
                     .transition(isIncoming ? .identity : .asymmetric(
                         insertion: AnyTransition.opacity.combined(with: .scale(scale: 0.95)).animation(.linear(duration: viewModel.config.fadeInDuration)),
