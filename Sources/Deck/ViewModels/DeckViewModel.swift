@@ -52,9 +52,12 @@ where Item: Identifiable & Equatable {
     /// Creates a new view model to manage a `Deck`.
     /// - Parameters:
     ///   - items: The array of identifiable items to display in the deck.
+    ///   - startIndex: The index of the card that should start out on the top of the deck
     ///   - config: The configuration defining the physical behavior of the deck. Defaults to standard values.
-    public init(items: [Item], config: DeckConfig = DeckConfig()) {
+    public init(items: [Item], startIndex: Int = 0, config: DeckConfig = DeckConfig()) {
         self.items = items
+        self.internalIndex = startIndex
+        self.currentIndex = startIndex
         self.config = config
         
         calculateShownItems()
