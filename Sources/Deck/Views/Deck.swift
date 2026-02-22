@@ -271,9 +271,12 @@ extension Deck {
             let currentTranslation = gesture.translation
             
             isDragging = false
-            dragOffset = .zero
             
             viewModel.handleSwipeEnd(for: direction, at: index, from: currentTranslation, to: finalPoint, isProgrammatic: false)
+            
+            DispatchQueue.main.async {
+                self.dragOffset = .zero
+            }
             
         } else {
             withAnimation(viewModel.config.snapBackAnimation) {

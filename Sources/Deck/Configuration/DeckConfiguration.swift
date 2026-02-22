@@ -49,7 +49,7 @@ public struct DeckConfig {
         programmaticSwipeAnimation: Animation = .easeIn(duration: 0.33),
         undoAnimation: Animation = .easeInOut(duration: 0.33),
         swipeDuration: TimeInterval = 0.45,
-        undoDuration: TimeInterval = 0.48,
+        undoDuration: TimeInterval = 0.28,
         swipeDelay: TimeInterval = 0.12,
         undoDelay: TimeInterval = 0.12,
         fadeInDuration: TimeInterval = 0.2,

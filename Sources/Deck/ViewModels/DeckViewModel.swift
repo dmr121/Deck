@@ -142,16 +142,17 @@ extension DeckViewModel {
             currentlySwipingItems[existingIndex].state = .leaving
             currentlySwipingItems[existingIndex].predictedEnd = endPoint
             currentlySwipingItems[existingIndex].isProgrammatic = isProgrammatic
+            currentlySwipingItems[existingIndex].currentTranslation = translation
             currentlySwipingItems[existingIndex].task = cleanupTask
         } else {
             currentlySwipingItems.append((index: index, direction: direction, state: .leaving, currentTranslation: translation, predictedEnd: endPoint, isProgrammatic: isProgrammatic, task: cleanupTask))
         }
         
         withAnimation(animation) {
-            internalIndex = (index == items.count - 1) ? nil: min(index + 1, items.count - 1)
-            calculateShownItems()
-            if let idx = currentlySwipingItems.firstIndex(where: { $0.index == index }) {
-                currentlySwipingItems[idx].currentTranslation = .init(width: endPoint.x, height: endPoint.y)
+            self.internalIndex = (index == self.items.count - 1) ? nil: min(index + 1, self.items.count - 1)
+            self.calculateShownItems()
+            if let idx = self.currentlySwipingItems.firstIndex(where: { $0.index == index }) {
+                self.currentlySwipingItems[idx].currentTranslation = .init(width: endPoint.x, height: endPoint.y)
             }
         }
     }
