@@ -88,7 +88,6 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     let currentSwipeDirection: SwipeDirection = {
                         if !isActivelySwiping { return lastSwipeDirection }
                         let horizontalDirection: SwipeDirection = offsetX > 0 ? .right : .left
-                        // Logic simplified to only care about horizontal
                         return horizontalDirection
                     }()
                     
@@ -97,7 +96,8 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                         let activeDragForOpacity = (currentSwipeDirection == .left || currentSwipeDirection == .right) ? abs(offsetX) : abs(offsetY)
                         let maxDragForOpacity = geometry.size.width * viewModel.config.dragThreshold
                         let clampedOpacityDrag = min(activeDragForOpacity, maxDragForOpacity)
-                        return Double(clampedOpacityDrag / maxDragForOpacity)
+                        let linearOpacity = Double(clampedOpacityDrag / maxDragForOpacity)
+                        return pow(linearOpacity, 0.8)
                     }()
                     
                     let rotationDegrees: Double = {
