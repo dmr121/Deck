@@ -28,6 +28,7 @@ import SwiftUI
 public struct Deck<Item, Content, DetailOverlay, SwipeOverlay>: View
 where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeOverlay: View {
     private let allowedDirections: Set<SwipeDirection>
+    private let canTapToUndo: Bool
     private let viewModel: DeckViewModel<Item>
     private let onSwipe: ((Item, SwipeDirection) -> Void)?
     private let onUndo: ((Item) -> Void)?
@@ -45,6 +46,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
     /// Creates a new swipable deck view.
     /// - Parameters:
     ///   - directions: A set of `SwipeDirection` indicating which directions a user is allowed to swipe.
+    ///   - canTapToUndo: If previously swiped cards can be undone.
     ///   - viewModel: The `DeckViewModel` that manages the data and state of the deck.
     ///   - onSwipe: An optional closure executed when an item is successfully swiped.
     ///   - onUndo: An optional closure executed when a swiped item is undone.
@@ -53,6 +55,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
     ///   - swipeOverlay: A closure that returns a view representing the action of the current swipe direction (e.g., a "LIKE" stamp).
     public init(
         _ directions: Set<SwipeDirection>,
+        canTapToUndo: Bool = true,
         viewModel: DeckViewModel<Item>,
         onSwipe: ((Item, SwipeDirection) -> Void)? = nil,
         onUndo: ((Item) -> Void)? = nil,
@@ -61,6 +64,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
         @ViewBuilder swipeOverlay: @escaping (SwipeDirection) -> SwipeOverlay
     ) {
         self.allowedDirections = directions
+        self.canTapToUndo = canTapToUndo
         self.viewModel = viewModel
         self.viewModel.onSwipe = onSwipe
         self.viewModel.onUndo = onUndo
@@ -194,6 +198,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
 // MARK: Private functions
 extension Deck {
     private func handleTap() {
+        guard canTapToUndo else { return }
         guard !isDragging else { return }
         viewModel.handleTap()
     }

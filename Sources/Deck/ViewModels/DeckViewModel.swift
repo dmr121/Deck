@@ -158,6 +158,8 @@ extension DeckViewModel {
     }
     
     internal func handleTap() {
+        guard internalIndex != nil else { return }
+        
         let currentTime = CFAbsoluteTimeGetCurrent()
         guard currentTime - lastUndoTime >= config.undoDelay else { return }
         lastUndoTime = currentTime
