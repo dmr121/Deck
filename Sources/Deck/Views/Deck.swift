@@ -17,7 +17,7 @@ import SwiftUI
 /// ```swift
 /// let viewModel = DeckViewModel(items: profiles)
 ///
-/// Deck([.left, .right], viewModel: viewModel) { item, isOnTop in
+/// Deck([.left, .right], viewModel: viewModel) { item, isOnTop, isMoving in
 ///     CardView(profile: item)
 /// } detailOverlay: { item in
 ///     CardDetailView(profile: item)
@@ -31,7 +31,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
     private let viewModel: DeckViewModel<Item>
     private let onSwipe: ((Item, SwipeDirection) -> Void)?
     private let onUndo: ((Item) -> Void)?
-    private let content: (Item, Bool) -> Content
+    private let content: (Item, Bool, Bool) -> Content
     @ViewBuilder private var detailOverlay: (Item) -> DetailOverlay
     @ViewBuilder let swipeOverlay: (SwipeDirection) -> SwipeOverlay
     
@@ -48,7 +48,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
     ///   - viewModel: The `DeckViewModel` that manages the data and state of the deck.
     ///   - onSwipe: An optional closure executed when an item is successfully swiped.
     ///   - onUndo: An optional closure executed when a swiped item is undone.
-    ///   - content: A closure that returns the view for an individual item. The boolean indicates if the item is currently on top.
+    ///   - content: A closure that returns the view for an individual item. The boolean indicates if the item is currently on top, and if it is moving.
     ///   - detailOverlay: A closure that returns a view to overlay on the card when tapped or focused.
     ///   - swipeOverlay: A closure that returns a view representing the action of the current swipe direction (e.g., a "LIKE" stamp).
     public init(
@@ -56,7 +56,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
         viewModel: DeckViewModel<Item>,
         onSwipe: ((Item, SwipeDirection) -> Void)? = nil,
         onUndo: ((Item) -> Void)? = nil,
-        content: @escaping (Item, Bool) -> Content,
+        content: @escaping (Item, Bool, Bool) -> Content,
         @ViewBuilder detailOverlay: @escaping (Item) -> DetailOverlay,
         @ViewBuilder swipeOverlay: @escaping (SwipeDirection) -> SwipeOverlay
     ) {
@@ -127,7 +127,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     }()
                     
                     ZStack {
-                        content(item, isOnTop)
+                        content(item, isOnTop, currentlySwipingItem != nil)
                             .zIndex(0)
                         
                         detailOverlay(item)
@@ -151,7 +151,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                         removal: .opacity
                     ))
                     .zIndex(-Double(index))
-                    .highPriorityGesture(
+                    .gesture(
                         DragGesture()
                             .updating($dragGestureActive) { value, state, transaction in
                                 state = true
@@ -177,7 +177,7 @@ where Item: Identifiable & Equatable, Content: View, DetailOverlay: View, SwipeO
                     .onEnded({
                         handleTap()
                     }),
-                including: isDragging ? .subviews : .gesture
+                including: isDragging ? .subviews : .all
             )
             .onChange(of: geometry.size) { _, newValue in
                 viewModel.viewSize = newValue
